@@ -122,7 +122,13 @@ dtheta_f.set_as_constraint(equals=circular_f, scaler=dtheta_scale)
 # h = r[-1]^2*dtheta[-1]
 # dh_dt = 2*r[-1]*dr[-1]*dtheta[-1] + r[-1]^2*ddr  (for stable orbit angular momentum const, dh_dt = 0)
 
-for i in range(num - 1):
+r_res = csdl.Variable(value=np.zeros((num - 1)))
+dr_res = csdl.Variable(value=np.zeros((num - 1)))
+theta_res = csdl.Variable(value=np.zeros((num - 1)))
+dtheta_res = csdl.Variable(value=np.zeros((num - 1)))
+m_res = csdl.Variable(value=np.zeros((num - 1)))
+
+for i in csdl.frange(num - 1):
     Fr = thrust_mag[i] * csdl.cos(theta[i] + thrust_angle[i])
     Ftheta = thrust_mag[i] * csdl.sin(theta[i] + thrust_angle[i])
 
@@ -141,21 +147,17 @@ for i in range(num - 1):
     dm = -Ftotal / (Isp * g0)
 
     # create the residuals for the dynamic constraints:
-    r0 = r[i + 1] - r[i] - (dr[i]) * dt
-    r0.set_as_constraint(equals=0, scaler=r_scale)
+    r_res = r_res.set(csdl.slice[i], r[i + 1] - r[i] - dr[i] * dt)
+    dr_res = dr_res.set(csdl.slice[i], dr[i + 1] - dr[i] - ddr[i] * dt)
+    theta_res = theta_res.set(csdl.slice[i], theta[i + 1] - theta[i] - dtheta[i] * dt)
+    dtheta_res = dtheta_res.set(csdl.slice[i], dtheta[i + 1] - dtheta[i] - ddtheta * dt)
+    m_res = m_res.set(csdl.slice[i], m[i + 1] - m[i] - dm * dt)
 
-    r1 = dr[i + 1] - dr[i] - ddr[i] * dt
-    r1.set_as_constraint(equals=0, scaler=dr_scale)
-
-    r2 = theta[i + 1] - theta[i] - dtheta[i] * dt
-    r2.set_as_constraint(equals=0, scaler=theta_scale)
-
-    r3 = dtheta[i + 1] - dtheta[i] - ddtheta * dt
-    r3.set_as_constraint(equals=0, scaler=dtheta_scale)
-
-    r4 = m[i + 1] - m[i] - dm * dt
-    r4.set_as_constraint(equals=0, scaler=m_scale)
-
+r_res.set_as_constraint(equals=0, scaler=r_scale)
+dr_res.set_as_constraint(equals=0, scaler=dr_scale)
+theta_res.set_as_constraint(equals=0, scaler=theta_scale)
+dtheta_res.set_as_constraint(equals=0, scaler=dtheta_scale)
+m_res.set_as_constraint(equals=0, scaler=m_scale)
 
 # angular momentum constraint
 # dh_dt_f = 2*r[-1]*dr[-1]*dtheta[-1] + r[-1]**2*ddr[-1]  #(for stable orbit angular momentum const, dh_dt = 0)

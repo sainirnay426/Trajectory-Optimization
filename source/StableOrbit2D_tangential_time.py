@@ -62,21 +62,22 @@ angular_vel_f = np.sqrt(u / (R_f ** 3))
 
 theta_end = np.pi
 num = 50
-time = (theta_end/np.pi) * np.pi * np.sqrt((a_transfer ** 3) / u)
-print(time)
-dt = time/num
+total_time = (theta_end/np.pi) * np.pi * np.sqrt((a_transfer ** 3) / u)
+print("estimated total time:", total_time)
+dt_val = total_time/num
+print("initial dt value:", dt_val)
 
 m_empty = 1000  # kg
 ve = Isp * g0
 delta_v = (delta_v1 + delta_v2) * 1000
 mass_ratio = np.exp(delta_v / ve)
 max_fuel = m_empty * (mass_ratio - 1)
-print(max_fuel)
+print("max_fuel:", max_fuel)
 
-burn_time = (dt*2)
+burn_time = (dt_val*2)
 thrust_req = ((max_fuel * ve) / burn_time)/1000
 max_thrust = thrust_req/2
-print(max_thrust)
+print("max thrust:", max_thrust)
 
 recorder = csdl.Recorder(inline=True)
 recorder.start()
@@ -89,8 +90,11 @@ m_scale = 1E-1
 F_scale = 1
 
 ### STATE
+dt = csdl.Variable(value=dt_val)
+dt.set_as_design_variable(lower=0.1, upper=dt_val*2, scaler=1.0) # change in scale
+
 theta_values = np.linspace(0, theta_end, num=num)
-theta = csdl.Variable(name='theta', value= theta_values)
+theta = csdl.Variable(name='theta', value=theta_values)
 theta.set_as_design_variable(scaler=theta_scale)
 
 r_values = np.zeros(num)
@@ -125,14 +129,14 @@ thrust_values[1] = max_thrust  # First burn at full thrust
 thrust_values[-2] = max_thrust  # Second burn at full thrust
 
 F_theta = csdl.Variable(name='F_theta', value=thrust_values + 0.00001)
-F_theta.set_as_design_variable(lower=-max_thrust*1.5, upper=max_thrust*1.5, scaler=F_scale)
+F_theta.set_as_design_variable(lower=-max_thrust*1.5, upper=max_thrust*1.5, scaler=F_scale) #change in scale
 
 m_values = np.zeros(num)
 m_values[0] = max_fuel
 
 for i in range(1, num):
-    if abs(thrust_values[i-1]) > 0:
-        dm = abs(thrust_values[i-1]*1000) / (Isp * g0) * dt
+    if abs(thrust_values[i-1]*1000) > 0:
+        dm = abs(thrust_values[i-1]) / (Isp * g0) * dt_val
         m_values[i] = m_values[i-1] - dm
     else:
         m_values[i] = m_values[i-1]
@@ -166,6 +170,9 @@ theta_f = theta[-1]
 theta_f.set_as_constraint(equals=np.pi, scaler=theta_scale)
 dtheta_f = dtheta[-1]
 dtheta_f.set_as_constraint(equals=angular_vel_f, scaler=dtheta_scale)
+
+T_total = dt * (num - 1)
+T_total.set_as_constraint(upper=total_time*1.5)
 
 r_res = csdl.Variable(value=np.zeros((num - 1)))
 dr_res = csdl.Variable(value=np.zeros((num - 1)))
@@ -217,19 +224,28 @@ m_res.set_as_constraint(equals=0, scaler=m_scale)
 # smoothness = 1E-5 * csdl.sum((thrust_mag)**2)
 
 smoothness_r = (r_scale**2) * csdl.sum((r[1:] - r[:-1])**2)
-thrust_changes = (F_scale**2) * (csdl.sum((F_theta[1:] - F_theta[:-1])**2))
+thrust_changes = (1E1) * (csdl.sum((F_theta[1:] - F_theta[:-1])**2))
 j = csdl.sum(m[0]-m[-1]) + smoothness_r + thrust_changes
 j.set_as_objective(scaler=m_scale)
 
 sim = csdl.experimental.JaxSimulator(recorder=recorder)
 prob = CSDLAlphaProblem(problem_name='StableOrbit', simulator=sim)
 # optimizer = SLSQP(prob, solver_options={'maxiter': 2000, 'ftol': 1E-4}, turn_off_outputs=True)
-optimizer = IPOPT(prob, solver_options={'max_iter': 1000, 'tol': 1E-4}, turn_off_outputs=True)
+optimizer = IPOPT(prob, solver_options={'max_iter': 2000, 'tol': 1E-5}, turn_off_outputs=True)
 results = optimizer.solve()
 optimizer.print_results()
 
 recorder.execute()
 
+print("Final residual norms:")
+print("‣ r_res max:", np.max(np.abs(r_res.value)))
+print("‣ dr_res max:", np.max(np.abs(dr_res.value)))
+print("‣ theta_res max:", np.max(np.abs(theta_res.value)))
+print("‣ dtheta_res max:", np.max(np.abs(dtheta_res.value)))
+print("‣ m_res max:", np.max(np.abs(m_res.value)))
+
+dt = dt.value
+print("dt value:", dt)
 r = r.value
 theta = theta.value
 x = r*np.cos(theta)
@@ -243,7 +259,7 @@ F_theta = F_theta.value
 # thrust_angle = thrust_angle.value
 # thrust_mag = thrust_mag.value
 
-folder_path = "tangential_result_plots_fscale(1)"
+folder_path = "tangential_time_result_plots"
 os.makedirs(folder_path, exist_ok=True)
 files = os.listdir(folder_path)
 for file in files:

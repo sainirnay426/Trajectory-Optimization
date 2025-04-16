@@ -63,8 +63,9 @@ else:
 angular_vel_i = np.sqrt(u / (R_i ** 3))
 angular_vel_f = np.sqrt(u / (R_f ** 3))
 
+theta_end = np.pi
 num = 50
-time = np.pi * np.sqrt((a_transfer ** 3)/(u))
+time = (theta_end/np.pi) * np.pi * np.sqrt((a_transfer ** 3) / u)
 dt = time/num
 
 m_empty = 1000  # kg
@@ -87,7 +88,7 @@ m_scale = 1E-2
 F_scale = 1E-3
 
 ### STATE
-theta_values = np.linspace(0, np.pi, num=num)
+theta_values = np.linspace(0, theta_end, num=num)
 
 r_values = np.zeros(num)
 r_values = p / (1 + ecc * np.cos(theta_values))
@@ -138,7 +139,7 @@ plt.title('trajectory')
 plt.plot(x, y, color='purple', linewidth=2)
 plt.xlim((-1E4,1E4))
 plt.ylim((-1E4,1E4))
-file_path = os.path.join(folder_path, "trajector.png")
+file_path = os.path.join(folder_path, "trajectory.png")
 plt.savefig(file_path)
 
 plt.figure(1)
