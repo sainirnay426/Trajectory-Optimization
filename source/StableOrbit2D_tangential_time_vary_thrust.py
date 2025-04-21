@@ -10,14 +10,14 @@ import matplotlib as mpl
 ### Planet centered at origin
 
 # Constants
-G = 6.67430 * 10**(-20)  #gravitational constant (km)
-M = 5.972 * 10**24  #planet mass (earth)
-Isp = 400 #s
+G = 6.67430 * 10 ** (-20)  # gravitational constant (km)
+M = 5.972 * 10 ** 24  # planet mass (earth)
+Isp = 400  # s
 g0 = 9.81
-u = G*M
-R = 6378 #earth radius (km)
-a_i = 300 #initial altitude (km)
-a_f = 700 #final altitude (km)
+u = G * M
+R = 6378  # earth radius (km)
+a_i = 300  # initial altitude (km)
+a_f = 700  # final altitude (km)
 
 R_i = R + a_i
 R_f = R + a_f
@@ -31,8 +31,8 @@ ascending = R_f > R_i
 
 # Calculate Hohmann transfer parameters
 a_transfer = (R_i + R_f) / 2  # Semi-major axis of transfer orbit
-ecc = 1 - R_f/a_transfer      # Eccentricity
-p = a_transfer * (1 - ecc**2) # Semi-latus rectum
+ecc = 1 - R_f / a_transfer  # Eccentricity
+p = a_transfer * (1 - ecc ** 2)  # Semi-latus rectum
 
 if ascending:
     periapsis = R_i
@@ -42,19 +42,19 @@ else:
     apoapsis = R_i
 
 ecc = (apoapsis - periapsis) / (apoapsis + periapsis)
-p = a_transfer * (1 - ecc**2)
+p = a_transfer * (1 - ecc ** 2)
 
 # Calculate delta-V requirements for burns
-v_periapsis = np.sqrt(2*u/periapsis - u/a_transfer)
-v_apoapsis = np.sqrt(2*u/apoapsis - u/a_transfer)
+v_periapsis = np.sqrt(2 * u / periapsis - u / a_transfer)
+v_apoapsis = np.sqrt(2 * u / apoapsis - u / a_transfer)
 
 if ascending:
-    delta_v1 = v_periapsis - np.sqrt(u/R_i)
-    delta_v2 = np.sqrt(u/R_f) - v_apoapsis
+    delta_v1 = v_periapsis - np.sqrt(u / R_i)
+    delta_v2 = np.sqrt(u / R_f) - v_apoapsis
     thrust_direction = 1
 else:
-    delta_v1 = np.sqrt(u/R_i) - v_apoapsis
-    delta_v2 = v_periapsis - np.sqrt(u/R_f)
+    delta_v1 = np.sqrt(u / R_i) - v_apoapsis
+    delta_v2 = v_periapsis - np.sqrt(u / R_f)
     thrust_direction = -1
 
 angular_vel_i = np.sqrt(u / (R_i ** 3))
@@ -62,22 +62,22 @@ angular_vel_f = np.sqrt(u / (R_f ** 3))
 
 theta_end = np.pi
 num = 50
-total_time = (theta_end/np.pi) * np.pi * np.sqrt((a_transfer ** 3) / u)
-print(total_time)
-dt_val = total_time/num
-print(dt_val)
+total_time = (theta_end / np.pi) * np.pi * np.sqrt((a_transfer ** 3) / u)
+print("trajectory time:", total_time)
+dt_val = total_time / num
+print("initial dt:", dt_val)
 
 m_empty = 1000  # kg
 ve = Isp * g0
 delta_v = (delta_v1 + delta_v2) * 1000
 mass_ratio = np.exp(delta_v / ve)
 max_fuel = m_empty * (mass_ratio - 1)
-print(max_fuel)
+print("max fuel", max_fuel)
 
-burn_time = (dt_val*2)
-thrust_req = ((max_fuel * ve) / burn_time)/1000
-max_thrust = thrust_req/2
-print(max_thrust)
+burn_time = (dt_val * 2)
+thrust_req = ((max_fuel * ve) / burn_time) / 1000
+max_thrust = thrust_req / 2
+print("thrust needed:", max_thrust)
 
 recorder = csdl.Recorder(inline=True)
 recorder.start()
@@ -91,7 +91,7 @@ F_scale = 1
 
 ### STATE
 dt = csdl.Variable(value=dt_val)
-dt.set_as_design_variable(lower=0.1, upper=dt_val*1.5, scaler=1.0)
+dt.set_as_design_variable(lower=0.1, upper=dt_val * 1.5, scaler=1E-1)
 
 theta_values = np.linspace(0, theta_end, num=num)
 theta = csdl.Variable(name='theta', value=theta_values)
@@ -103,12 +103,12 @@ r = csdl.Variable(name='r', value=r_values)
 r.set_as_design_variable(lower=R, scaler=r_scale)
 
 dr_values = np.zeros(num)
-dr_values = np.sqrt(u/p) * ecc * np.sin(theta_values)
+dr_values = np.sqrt(u / p) * ecc * np.sin(theta_values)
 dr = csdl.Variable(name='dr', value=dr_values)
 dr.set_as_design_variable(scaler=dr_scale)
 
-v_theta = np.sqrt(u/p) * (1 + ecc * np.cos(theta_values)) # Tangential velocity in elliptical orbit
-dtheta_values = v_theta / r_values # Convert to angular velocity
+v_theta = np.sqrt(u / p) * (1 + ecc * np.cos(theta_values))  # Tangential velocity in elliptical orbit
+dtheta_values = v_theta / r_values  # Convert to angular velocity
 dtheta = csdl.Variable(name='dtheta', value=dtheta_values)
 dtheta.set_as_design_variable(scaler=dtheta_scale)
 
@@ -129,19 +129,21 @@ thrust_values[1] = max_thrust  # First burn at full thrust
 thrust_values[-2] = max_thrust  # Second burn at full thrust
 
 F_theta = csdl.Variable(name='F_theta', value=thrust_values + 0.00001)
-F_theta.set_as_design_variable(lower=-max_thrust*2, upper=max_thrust*2, scaler=F_scale)
+# F_theta.set_as_design_variable(lower=-max_thrust, upper=max_thrust, scaler=F_scale)
+# F_theta.set_as_design_variable(lower=1E-2, upper=2 * max_thrust, scaler=F_scale)
+F_theta.set_as_design_variable(lower=-2 * max_thrust, upper=2 * max_thrust, scaler=F_scale)
 
 m_values = np.zeros(num)
 m_values[0] = max_fuel
 
 for i in range(1, num):
-    if abs(thrust_values[i-1]*1000) > 0:
-        dm = abs(thrust_values[i-1]) / (Isp * g0) * dt_val
-        m_values[i] = m_values[i-1] - dm
+    if abs(thrust_values[i - 1] * 1000) > 0:
+        dm = abs(thrust_values[i - 1]) / (Isp * g0) * dt_val
+        m_values[i] = m_values[i - 1] - dm
     else:
-        m_values[i] = m_values[i-1]
+        m_values[i] = m_values[i - 1]
 m = csdl.Variable(name='m', value=m_values)
-m.set_as_design_variable(lower=0, scaler=m_scale)
+m.set_as_design_variable(lower=0, scaler=1E-1)
 
 # For angular momentum
 ddr = csdl.Variable(name='ddr', value=np.zeros(num))
@@ -158,7 +160,8 @@ dtheta_0.set_as_constraint(equals=angular_vel_i, scaler=dtheta_scale)
 
 # final conditions
 m_f = m[-1]
-m_f.set_as_constraint(equals=0.01, scaler=m_scale)
+# m_f.set_as_constraint(equals=0.01, scaler=1E2)
+m_f.set_as_constraint(lower=0, upper=0.1, scaler=1E1)
 # Ftheta_f = F_theta[-1]
 # Ftheta_f.set_as_constraint(equals=0, scaler=F_scale)
 
@@ -172,7 +175,7 @@ dtheta_f = dtheta[-1]
 dtheta_f.set_as_constraint(equals=angular_vel_f, scaler=dtheta_scale)
 
 T_total = dt * (num - 1)
-T_total.set_as_constraint(upper=total_time*1.5)
+T_total.set_as_constraint(upper=total_time * 1.5)
 
 r_res = csdl.Variable(value=np.zeros((num - 1)))
 dr_res = csdl.Variable(value=np.zeros((num - 1)))
@@ -181,7 +184,6 @@ dtheta_res = csdl.Variable(value=np.zeros((num - 1)))
 m_res = csdl.Variable(value=np.zeros((num - 1)))
 
 for i in csdl.frange(num - 1):
-
     m_total = m[i] + m_empty
     ## acceleration (radial direction)
     # a_r = ddr + r*(dtheta)^2
@@ -193,12 +195,12 @@ for i in csdl.frange(num - 1):
 
     ## acceleration (theta direction)
     # a_theta = r*(ddtheta) + 2*dr*dtheta
-    ddtheta = 1 / (r[i] * 1000) * ((F_theta[i]*1000) / m_total - 2 * dr[i] * dtheta[i])
+    ddtheta = 1 / (r[i] * 1000) * ((F_theta[i] * 1000) / m_total - 2 * dr[i] * dtheta[i])
     # ddtheta = 1 / (r[i] * 1000) * (thrust_mag[i] / m_total - 2 * dr[i] * dtheta[i])
 
     # mass consumption
     Ftotal = csdl.sqrt(F_theta[i] ** 2)
-    dm = -(Ftotal*1000) / (Isp * g0)
+    dm = -(Ftotal * 1000) / (Isp * g0)
 
     # create the residuals for the dynamic constraints:
     r_res = r_res.set(csdl.slice[i], r[i + 1] - r[i] - dr[i] * 1e-3 * dt)
@@ -207,11 +209,16 @@ for i in csdl.frange(num - 1):
     dtheta_res = dtheta_res.set(csdl.slice[i], dtheta[i + 1] - dtheta[i] - ddtheta * dt)
     m_res = m_res.set(csdl.slice[i], m[i + 1] - m[i] - dm * dt)
 
-r_res.set_as_constraint(equals=0, scaler=r_scale)
-dr_res.set_as_constraint(equals=0, scaler=dr_scale)
-theta_res.set_as_constraint(equals=0, scaler=theta_scale)
-dtheta_res.set_as_constraint(equals=0, scaler=dtheta_scale)
-m_res.set_as_constraint(equals=0, scaler=m_scale)
+# r_scale = 1E-3
+# dr_scale = 1E1
+# theta_scale = 1
+# dtheta_scale = 1E3
+r_res.set_as_constraint(equals=0, scaler=1)
+dr_res.set_as_constraint(equals=0, scaler=1)
+theta_res.set_as_constraint(equals=0, scaler=1)
+dtheta_res.set_as_constraint(equals=0, scaler=1)
+# m_res.set_as_constraint(equals=0, scaler=m_scale)
+m_res.set_as_constraint(equals=0, scaler=1E4)
 
 # angular momentum constraint
 # dh_dt_f = 2*r[-1]*dr[-1]*dtheta[-1] + r[-1]**2*ddr[-1]  #(for stable orbit angular momentum const, dh_dt = 0)
@@ -223,12 +230,22 @@ m_res.set_as_constraint(equals=0, scaler=m_scale)
 # takes difference between 2 adjacent values and squares
 # smoothness = 1E-5 * csdl.sum((thrust_mag)**2)
 
-# r_smooth = (r_scale**2) * csdl.sum((r[1:] - r[:-1])**2)
-thrust_smooth = (F_scale**2) * (csdl.sum((F_theta[1:] - F_theta[:-1])**2))
-thrust_penalty = F_scale * csdl.sum(csdl.sqrt(F_theta**2))
-mass_penalty = csdl.sum(m[0]-m[-1])
-j = mass_penalty + thrust_smooth + thrust_penalty
-j.set_as_objective(scaler=m_scale)
+# smoothness_r = (r_scale**2) * csdl.sum((r[1:] - r[:-1])**2)
+thrust_changes = (csdl.sum((F_theta[1:] - F_theta[:-1])**2))
+mass_penalty = csdl.sum(m[0] - m[-1])
+thrust_penalty = csdl.sum(F_theta ** 2)
+
+# j = thrust_penalty
+# j.set_as_objective(scaler=1)
+
+# j = 1.5*thrust_penalty + 1E-2*mass_penalty*m_scale
+# j.set_as_objective(scaler=1)
+
+j = 2*thrust_penalty + 1E-3*mass_penalty*m_scale
+j.set_as_objective(scaler=1) #BEST
+
+# j = 2.5*thrust_penalty + 1E-3*mass_penalty*m_scale
+# j.set_as_objective(scaler=1)
 
 sim = csdl.experimental.JaxSimulator(recorder=recorder)
 prob = CSDLAlphaProblem(problem_name='StableOrbit', simulator=sim)
@@ -250,8 +267,8 @@ dt = dt.value
 print("dt value:", dt)
 r = r.value
 theta = theta.value
-x = r*np.cos(theta)
-y = r*np.sin(theta)
+x = r * np.cos(theta)
+y = r * np.sin(theta)
 
 dr = dr.value
 dtheta = dtheta.value
@@ -261,7 +278,7 @@ F_theta = F_theta.value
 # thrust_angle = thrust_angle.value
 # thrust_mag = thrust_mag.value
 
-folder_path = "tangential_time_result_plots"
+folder_path = "tangential_time_vary_result_plots"
 os.makedirs(folder_path, exist_ok=True)
 files = os.listdir(folder_path)
 for file in files:

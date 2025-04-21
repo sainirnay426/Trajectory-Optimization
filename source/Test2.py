@@ -15,7 +15,7 @@ g0 = 9.81
 u = G * M
 R = 6378  # earth radius (km)
 a_i = 300  # initial altitude (km)
-a_f = 700  # final altitude (km)
+a_f = 1500  # final altitude (km)
 
 R_i = R + a_i
 R_f = R + a_f
@@ -57,8 +57,8 @@ else:
     delta_v2 = v_periapsis - np.sqrt(u / R_f)
     thrust_direction = -1
 
-# print(delta_v1)
-# print(delta_v2)
+print("delta_v1", delta_v1)
+print("delta_v2", delta_v2)
 
 angular_vel_i = np.sqrt(u / (R_i ** 3))
 angular_vel_f = np.sqrt(u / (R_f ** 3))
@@ -70,14 +70,26 @@ dt = time/num
 
 m_empty = 1000  # kg
 ve = Isp * g0
-delta_v = (delta_v1 + delta_v2) * 1000
-mass_ratio = np.exp(delta_v / ve)
-max_fuel = m_empty * (mass_ratio - 1)
-print(max_fuel)
 
-burn_time = (dt*2)
-thrust_req = (max_fuel * ve) / burn_time
-max_thrust = thrust_req/2
+m_burn_2 = m_empty * np.exp(np.abs(delta_v2)*1000 / ve)
+prop_burn_2 = m_burn_2 - m_empty
+
+m_burn_1 = m_burn_2 * np.exp(np.abs(delta_v1)*1000 / ve)
+prop_burn_1 = m_burn_1 - m_burn_2
+max_fuel = prop_burn_1 + prop_burn_2
+
+print("prop_burn_1:", prop_burn_1)
+print("prop_burn_2:", prop_burn_2)
+print("max_fuel:", max_fuel)
+
+burn_time = dt
+
+thrust_1 = ((prop_burn_1 * ve) / burn_time)/1000
+thrust_2 = ((prop_burn_2 * ve) / burn_time)/1000
+print("thrust 1:", thrust_1)
+print("thrust 2:", thrust_2)
+
+max_thrust = max(thrust_1, thrust_2)
 print(max_thrust)
 
 r_scale = 1E-3
@@ -88,38 +100,32 @@ m_scale = 1E-2
 F_scale = 1E-3
 
 ### STATE
-theta_values = np.linspace(0, theta_end, num=num)
+if ascending:
+    theta_values = np.linspace(0, theta_end, num=num)
+else:
+    theta_values = np.linspace(theta_end, 0, num=num)
 
 r_values = np.zeros(num)
 r_values = p / (1 + ecc * np.cos(theta_values))
 
 dr_values = np.zeros(num)
-dr_values = np.sqrt(u / p) * ecc * np.sin(theta_values)
+dr_values = np.sqrt((u * 10**9) / (p * 10**3)) * ecc * np.sin(theta_values)
 
 v_theta = np.sqrt(u / p) * (1 + ecc * np.cos(theta_values))  # Tangential velocity in elliptical orbit
 dtheta_values = v_theta / r_values  # Convert to angular velocity
 
 ### CONTROLS
-# # Thrust profile for continuous approximation of Hohmann
-# thrust_values = np.zeros(num)
-# # First burn region (initial 10% of trajectory)
-# burn1_duration = int(num * 0.1)
-# thrust_values[:burn1_duration] = thrust_direction * (max_thrust/2.3) * np.ones(burn1_duration)
-# # Coast phase
-# burn2_start = int(num * 0.9)
-# thrust_values[burn1_duration:burn2_start] = 0
-# # Second burn region (final 10% of trajectory)
-# thrust_values[burn2_start:] = -thrust_direction * (max_thrust/2.3) * np.ones(num - burn2_start)
 
 thrust_values = np.zeros(num)
-thrust_values[1] = max_thrust
-thrust_values[-2] = max_thrust
+thrust_sign = 1 if ascending else -1
+thrust_values[1] = thrust_sign * thrust_1
+thrust_values[-2] = thrust_sign * thrust_2
 
 m_values = np.zeros(num)
 m_values[0] = max_fuel
 for i in range(1, num):
     if abs(thrust_values[i - 1]) > 0:
-        dm = abs(thrust_values[i - 1]) / (Isp * g0) * dt
+        dm = abs(thrust_values[i - 1]*1000) / (Isp * g0) * dt
         m_values[i] = m_values[i - 1] - dm
     else:
         m_values[i] = m_values[i - 1]
@@ -137,8 +143,8 @@ for file in files:
 plt.figure(0)
 plt.title('trajectory')
 plt.plot(x, y, color='purple', linewidth=2)
-plt.xlim((-1E4,1E4))
-plt.ylim((-1E4,1E4))
+plt.xlim((-1E4, 1E4))
+plt.ylim((-1E4, 1E4))
 file_path = os.path.join(folder_path, "trajectory.png")
 plt.savefig(file_path)
 
