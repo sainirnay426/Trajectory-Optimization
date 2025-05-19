@@ -5,13 +5,24 @@ from modopt import CSDLAlphaProblem
 from modopt import SLSQP, IPOPT, COBYLA, NelderMead, PySLSQP
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from scipy.integrate import quad
 
+import pykep as pk
 
 ### Planet centered at origin
 
 def scale_factor(a):
     power = np.log10(np.abs(a))
     return 10 ** -np.floor(power)
+
+
+def time_of_flight(p, e, theta_start, theta_end, u, use_sin):
+    if use_sin:
+        integrand = lambda th: 1 / (1 + e * np.sin(th)) ** 2
+    else:
+        integrand = lambda th: 1 / (1 + e * np.cos(th)) ** 2
+    integral, _ = quad(integrand, theta_start, theta_end)
+    return np.sqrt(p ** 3 / u) * integral
 
 
 # Constants
@@ -23,6 +34,8 @@ u = G * M
 R = 6378  # earth radius (km)
 a_i = 300  # initial altitude (km)
 a_f = 1100  # final altitude (km)
+theta_start = 0
+theta_end = np.pi
 
 R_i = R + a_i
 R_f = R + a_f
@@ -30,49 +43,54 @@ R_f = R + a_f
 # ascending or descending
 ascending = R_f > R_i
 
-# Calculate Hohmann transfer parameters
-a_transfer = (R_i + R_f) / 2  # Semi-major axis of transfer orbit
-ecc = 1 - R_f / a_transfer  # Eccentricity
-p = a_transfer * (1 - ecc ** 2)  # Semi-latus rectum
+cos_0 = np.cos(theta_start)
+cos_f = np.cos(theta_end)
 
-if ascending:
-    periapsis = R_i
-    apoapsis = R_f
+if abs(cos_0) < 1e-3 and abs(cos_f) < 1e-3:
+    trig_0 = np.sin(theta_start)
+    trig_f = np.sin(theta_end)
+    use_sin = True
 else:
-    periapsis = R_f
-    apoapsis = R_i
+    trig_0 = cos_0
+    trig_f = cos_f
+    use_sin = False
 
-ecc = (apoapsis - periapsis) / (apoapsis + periapsis)
-p = a_transfer * (1 - ecc ** 2)
+A = np.array([
+    [R_i * trig_0, -1],
+    [R_f * trig_f, -1]
+])
+b = np.array([-R_i, -R_f])
+solution = np.linalg.solve(A, b)
 
-# Calculate delta-V requirements for burns
-v_periapsis = np.sqrt(2 * u / periapsis - u / a_transfer)
-v_apoapsis = np.sqrt(2 * u / apoapsis - u / a_transfer)
+e_fit = solution[0]
+p_fit = solution[1]
 
-if ascending:
-    delta_v1 = v_periapsis - np.sqrt(u / R_i)
-    delta_v2 = np.sqrt(u / R_f) - v_apoapsis
-    thrust_direction = 1
-else:
-    delta_v1 = np.sqrt(u / R_i) - v_apoapsis
-    delta_v2 = v_periapsis - np.sqrt(u / R_f)
-    thrust_direction = -1
+print('e-fit:', e_fit)
+print('p-fit:', p_fit)
+
+# 3. Get velocity magnitudes at R_i and R_f using vis-viva
+a_transfer = p_fit / (1 - e_fit ** 2)
+
+v0_elip = np.sqrt(u * (2 / R_i - 1 / a_transfer))
+vf_elip = np.sqrt(u * (2 / R_f - 1 / a_transfer))
+
+v0_circular = np.sqrt(u / R_i)
+vf_circular = np.sqrt(u / R_f)
 
 angular_vel_i = np.sqrt(u / (R_i ** 3))
 angular_vel_f = np.sqrt(u / (R_f ** 3))
 
-if ascending:
-    theta_start = 0
-    theta_end = np.pi
-else:
-    theta_start = np.pi
-    theta_end = 2*np.pi
+delta_v1 = np.abs(v0_elip - v0_circular)
+delta_v2 = np.abs(vf_circular - vf_elip)
 
-num = 50
-# total_time = (theta_end / np.pi) * np.pi * np.sqrt((a_transfer ** 3) / u)
-total_time = np.pi * np.sqrt((a_transfer ** 3) / u)
+total_time = time_of_flight(p_fit, e_fit, theta_start, theta_end, u, use_sin)
+h_time = np.pi * np.sqrt((a_transfer ** 3) / u)
+
+num = int(50 * (total_time / h_time))
+
 print("\ntrajectory time estimate:", total_time)
 dt_val = total_time / num
+print("# of steps:", num)
 print("dt estimate:", dt_val)
 
 m_empty = 1000  # kg
@@ -102,18 +120,12 @@ max_thrust = max(thrust_1, thrust_2)
 recorder = csdl.Recorder(inline=True)
 recorder.start()
 
-scale_factor(max(R_i, R_f))
-# r_scale = 1E-3
-# theta_scale = 1
-# dr_scale = 1E1
-# dtheta_scale = 1E3
-# m_scale = 1E-1
-# F_scale = 1
-
 ### STATE
+ecc = e_fit
+p = p_fit
+
 dt = csdl.Variable(value=dt_val)
 dt.set_as_design_variable(lower=0.1, upper=dt_val * 1.5, scaler=1E-1)
-
 
 theta_values = np.linspace(theta_start, theta_end, num=num)
 theta_scale = 1
@@ -139,19 +151,28 @@ dtheta = csdl.Variable(name='dtheta', value=dtheta_values)
 dtheta.set_as_design_variable(scaler=dtheta_scale)
 
 ### CONTROLS
-
 thrust_values = np.zeros(num)
-thrust_sign = 1 if ascending else -1
-thrust_values[1] = thrust_sign * thrust_1
-thrust_values[-2] = thrust_sign * thrust_2
+thrust_values[1] = thrust_1
+thrust_values[-2] = thrust_2
 
 F_scale = scale_factor(max_thrust)
-F_theta = csdl.Variable(name='F_theta', value=thrust_values + 0.00001)
+thrust = csdl.Variable(name='thrust', value=thrust_values + 0.00001)
+thrust.set_as_design_variable(lower=0, upper=max_thrust, scaler=F_scale)
 # F_theta.set_as_design_variable(lower=-max_thrust, upper=max_thrust, scaler=F_scale)
+
+
 if ascending:
-    F_theta.set_as_design_variable(lower=-1E-2, upper=2 * max_thrust, scaler=F_scale)
+    thrust_ang_values = np.linspace(0, 0, num=num)
 else:
-    F_theta.set_as_design_variable(lower=-2 * max_thrust, upper=1E-2, scaler=F_scale)
+    thrust_ang_values = np.linspace(np.pi, np.pi, num=num)
+
+thrust_ang = csdl.Variable(name='thrust_ang', value=thrust_ang_values)
+thrust_ang.set_as_design_variable(lower=0, upper=2*np.pi, scaler=1)
+
+# if ascending:
+#     F_theta.set_as_design_variable(lower=-1E-2, upper=2 * max_thrust, scaler=F_scale)
+# else:
+#     F_theta.set_as_design_variable(lower=-2 * max_thrust, upper=1E-2, scaler=F_scale)
 
 m_values = np.zeros(num)
 m_scale = scale_factor(max_fuel)
@@ -159,12 +180,19 @@ m_values[0] = max_fuel
 
 for i in range(1, num):
     if abs(thrust_values[i - 1] * 1000) > 0:
-        dm = abs(thrust_values[i - 1]) / (Isp * g0) * dt_val
+        dm = abs(thrust_values[i - 1] * 1000) / (Isp * g0) * dt_val
         m_values[i] = m_values[i - 1] - dm
     else:
         m_values[i] = m_values[i - 1]
 m = csdl.Variable(name='m', value=m_values)
 m.set_as_design_variable(lower=0, scaler=m_scale)
+
+# r_scale = 1E-3
+# theta_scale = 1
+# dr_scale = 1E1
+# dtheta_scale = 1E3
+# m_scale = 1E-1
+# F_scale = 1
 
 print("\nr_scale:", r_scale)
 print("theta_scale:", theta_scale)
@@ -202,8 +230,8 @@ theta_f.set_as_constraint(equals=theta_end, scaler=theta_scale)
 dtheta_f = dtheta[-1]
 dtheta_f.set_as_constraint(equals=angular_vel_f, scaler=scale_factor(angular_vel_f))
 
-T_total = dt * (num - 1)
-T_total.set_as_constraint(upper=total_time * 1.5)
+tof = dt * (num - 1)
+tof.set_as_constraint(upper=total_time * 1.5)
 
 r_res = csdl.Variable(value=np.zeros((num - 1)))
 dr_res = csdl.Variable(value=np.zeros((num - 1)))
@@ -213,9 +241,13 @@ m_res = csdl.Variable(value=np.zeros((num - 1)))
 
 for i in csdl.frange(num - 1):
     m_total = m[i] + m_empty
+
+    Fr = thrust[i] * csdl.sin(-thrust_ang[i])
+    Ftheta = thrust[i] * csdl.cos(thrust_ang[i])
+
     ## acceleration (radial direction)
     # a_r = ddr + r*(dtheta)^2
-    val = - (u * 10 ** 9) / ((r[i] * 1000) ** 2) + (r[i] * 1000) * (dtheta[i] ** 2)
+    val = (Fr*1000) / m_total - (u * 10 ** 9) / ((r[i] * 1000) ** 2) + (r[i] * 1000) * (dtheta[i] ** 2)
 
     # no radial thrust control (no F component)
     # val = - ((u * 10 ** 9) / ((r[i] * 1000) ** 2)) + (r[i] * 1000) * (dtheta[i] ** 2)
@@ -223,11 +255,11 @@ for i in csdl.frange(num - 1):
 
     ## acceleration (theta direction)
     # a_theta = r*(ddtheta) + 2*dr*dtheta
-    ddtheta = 1 / (r[i] * 1000) * ((F_theta[i] * 1000) / m_total - 2 * dr[i] * dtheta[i])
+    ddtheta = 1 / (r[i] * 1000) * ((Ftheta * 1000) / m_total - 2 * dr[i] * dtheta[i])
     # ddtheta = 1 / (r[i] * 1000) * (thrust_mag[i] / m_total - 2 * dr[i] * dtheta[i])
 
     # mass consumption
-    Ftotal = csdl.sqrt(F_theta[i] ** 2)
+    Ftotal = csdl.sqrt(thrust[i] ** 2)
     dm = -(Ftotal * 1000) / (Isp * g0)
 
     # create the residuals for the dynamic constraints:
@@ -241,7 +273,6 @@ r_res.set_as_constraint(equals=0, scaler=1)
 dr_res.set_as_constraint(equals=0, scaler=1)
 theta_res.set_as_constraint(equals=0, scaler=1)
 dtheta_res.set_as_constraint(equals=0, scaler=1)
-# m_res.set_as_constraint(equals=0, scaler=m_scale)
 m_res.set_as_constraint(equals=0, scaler=1E3)
 
 # angular momentum constraint
@@ -255,18 +286,21 @@ m_res.set_as_constraint(equals=0, scaler=1E3)
 # smoothness = 1E-5 * csdl.sum((thrust_mag)**2)
 
 # smoothness_r = (r_scale**2) * csdl.sum((r[1:] - r[:-1])**2)
-# thrust_changes = (1E1) * (csdl.sum((F_theta[1:] - F_theta[:-1])**2))
+thrust_ang_changes = csdl.sum((thrust_ang[1:] - thrust_ang[:-1])**2)
+
 mass_penalty = csdl.sum(m[0] - m[-1])
-thrust_penalty = csdl.sum(F_theta ** 2)
+thrust_penalty = csdl.sum(thrust ** 2)
 
+# j = mass_penalty + 0.5 * thrust_penalty
+# j.set_as_objective(scaler=m_scale)
 
-j = mass_penalty + 0.5 * thrust_penalty
+j = mass_penalty + thrust_ang_changes
 j.set_as_objective(scaler=m_scale)
 
 sim = csdl.experimental.JaxSimulator(recorder=recorder)
 prob = CSDLAlphaProblem(problem_name='StableOrbit', simulator=sim)
-optimizer = SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': 1E-4}, turn_off_outputs=True)
-# optimizer = IPOPT(prob, solver_options={'max_iter': 1000, 'tol': 1E-4}, turn_off_outputs=True)
+# optimizer = SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': 1E-6}, turn_off_outputs=True)
+optimizer = IPOPT(prob, solver_options={'max_iter': 1000, 'tol': 1E-4}, turn_off_outputs=True)
 results = optimizer.solve()
 optimizer.print_results()
 
@@ -286,15 +320,24 @@ theta = theta.value
 x = r * np.cos(theta)
 y = r * np.sin(theta)
 
+th = np.linspace(0, 2*np.pi, num=num)
+orbit_0x = R_i * np.cos(th)
+orbit_0y = R_i * np.sin(th)
+orbit_fx = R_f * np.cos(th)
+orbit_fy = R_f * np.sin(th)
+
 dr = dr.value
 dtheta = dtheta.value
 m = m.value
-F_theta = F_theta.value
+thrust = thrust.value
+thrust_ang = thrust_ang.value
 
-# thrust_angle = thrust_angle.value
-# thrust_mag = thrust_mag.value
+Fr = thrust * np.sin(thrust_ang)
+Ftheta = thrust * np.cos(thrust_ang)
 
-folder_path = "tangential_time_single_result_plots"
+thrust_ang = thrust_ang * 180/np.pi
+
+folder_path = "tangential_time_lambert_plots"
 os.makedirs(folder_path, exist_ok=True)
 files = os.listdir(folder_path)
 for file in files:
@@ -302,50 +345,68 @@ for file in files:
     os.remove(file_path)
 
 # Plotting
-plt.figure(0)
+plt.figure()
 plt.title('radius')
 plt.plot(r)
 file_path = os.path.join(folder_path, "radius.png")
 plt.savefig(file_path)
 
-plt.figure(1)
+plt.figure()
 plt.title('dr')
 plt.plot(dr)
 file_path = os.path.join(folder_path, "dr.png")
 plt.savefig(file_path)
 
-plt.figure(2)
+plt.figure()
 plt.title('theta')
 plt.plot(theta)
 file_path = os.path.join(folder_path, "theta.png")
 plt.savefig(file_path)
 
-plt.figure(3)
+plt.figure()
 plt.title('dtheta')
 plt.plot(dtheta)
 file_path = os.path.join(folder_path, "dtheta.png")
 plt.savefig(file_path)
 
-plt.figure(4)
+plt.figure()
 plt.title('prop mass')
 plt.plot(m)
 file_path = os.path.join(folder_path, "prop mass.png")
 plt.savefig(file_path)
 
-plt.figure(5)
+plt.figure()
 plt.title('trajectory')
 plt.plot(x, y, color='purple', linewidth=2)
+plt.plot(orbit_0x, orbit_0y, color='purple', linestyle='dotted', linewidth=2)
+plt.plot(orbit_fx, orbit_fy, color='purple', linestyle='dotted', linewidth=2)
+plt.xlim((-1E4, 1E4))
+plt.ylim((-1E4, 1E4))
 file_path = os.path.join(folder_path, "trajectory.png")
 plt.savefig(file_path)
 
-plt.figure(6)
-plt.title('thrust (theta)')
-plt.plot(F_theta)
-file_path = os.path.join(folder_path, "thrust (theta).png")
+plt.figure()
+plt.title('thrust')
+plt.plot(thrust)
+file_path = os.path.join(folder_path, "thrust.png")
 plt.savefig(file_path)
 
-# plt.figure(7)
-# plt.title('thrust angle')
-# plt.plot(thrust_angle)
+plt.figure()
+plt.title('thrust angle')
+plt.plot(thrust_ang)
+file_path = os.path.join(folder_path, "thrust_ang.png")
+plt.savefig(file_path)
+
+plt.figure()
+plt.title('thrust (radial)')
+plt.plot(Fr)
+file_path = os.path.join(folder_path, "thrust_rad.png")
+plt.savefig(file_path)
+
+plt.figure()
+plt.title('thrust (theta)')
+plt.plot(Ftheta)
+file_path = os.path.join(folder_path, "thrust_th.png")
+plt.savefig(file_path)
 
 plt.show()
