@@ -36,7 +36,7 @@ R = 6378  # earth radius (km)
 a_i = 300  # initial altitude (km)
 a_f = 1100  # final altitude (km)
 theta_start = 0
-theta_end = 7*np.pi/6
+theta_end = np.pi
 
 R_i = R + a_i
 R_f = R + a_f
@@ -133,6 +133,8 @@ dr_values = np.sqrt((u * 10 ** 9) / (p * 10 ** 3)) * ecc * np.sin(theta_values)
 v_theta = np.sqrt(u / p) * (1 + ecc * np.cos(theta_values))  # Tangential velocity in elliptical orbit
 dtheta_values = v_theta / r_values  # Convert to angular velocity
 
+print("r_vals:", r_values.dtype, r_values.shape)
+print("theta_vals:", theta_values.dtype, theta_values.shape)
 
 ### CONTROLS
 thrust_values = np.zeros(num)
@@ -170,6 +172,8 @@ files = os.listdir(folder_path)
 for file in files:
     file_path = os.path.join(folder_path, file)
     os.remove(file_path)
+
+np.savez("rand_initial_guess_debug.npz", r=r_values, theta=theta_values, dr=dr_values, dtheta=dtheta_values, thrust=thrust_values, thrust_ang=thrust_ang_values, m=m_values)
 
 plt.figure()
 plt.title('trajectory')

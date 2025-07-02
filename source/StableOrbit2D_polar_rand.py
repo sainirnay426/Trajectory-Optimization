@@ -387,9 +387,11 @@ plt.savefig(file_path)
 
 plt.figure()
 plt.title('thrust')
+plt.ylim((-max_thrust, max_thrust))
 plt.plot(thrust)
 file_path = os.path.join(folder_path, "thrust.png")
 plt.savefig(file_path)
+
 
 plt.figure()
 plt.title('thrust angle')
@@ -399,12 +401,14 @@ plt.savefig(file_path)
 
 plt.figure()
 plt.title('thrust (radial)')
+plt.ylim((-max_thrust, max_thrust))
 plt.plot(Fr)
 file_path = os.path.join(folder_path, "thrust_rad.png")
 plt.savefig(file_path)
 
 plt.figure()
 plt.title('thrust (theta)')
+plt.ylim((-max_thrust, max_thrust))
 plt.plot(Ftheta)
 file_path = os.path.join(folder_path, "thrust_th.png")
 plt.savefig(file_path)

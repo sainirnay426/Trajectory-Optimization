@@ -29,8 +29,13 @@ m_empty = 1000
 Isp = 400  # s
 a_i = 300  # initial altitude (km)
 a_f = 1100  # final altitude (km)
-theta_start = 0
-theta_end = np.pi
+theta_start = np.pi/2
+theta_end = 7*np.pi/4
+
+# a_i = 300  # initial altitude (km)
+# a_f = 1100  # final altitude (km)
+# theta_start = 0
+# theta_end = np.pi
 
 R_i = R + a_i
 R_f = R + a_f
@@ -42,7 +47,7 @@ ascending = R_f > R_i
 
 # Time of flight
 h_time = np.pi * np.sqrt(((R_i + R_f) / 2) ** 3 / u) #Hohmann Transfer Time
-tof = h_time * (theta_end / np.pi) #Fraction of Hohmann Transfer Time
+tof = h_time * ((theta_end - theta_start) / np.pi) #Fraction of Hohmann Transfer Time
 
 # Initial and final position vectors
 r1 = [R_i * np.cos(theta_start), R_i * np.sin(theta_start), 0]
@@ -120,7 +125,7 @@ xdot_vals, ydot_vals = np.array(vxyz_vals[:, 0]), np.array(vxyz_vals[:, 1])
 
 r_vals = np.sqrt(x_vals ** 2 + y_vals ** 2)
 theta_vals = np.arctan2(y_vals, x_vals) % (2 * np.pi)
-dr_vals = (x_vals * xdot_vals + y_vals * ydot_vals) / r_vals
+dr_vals = ((x_vals * xdot_vals + y_vals * ydot_vals) / r_vals)*1000
 dtheta_vals = (x_vals * ydot_vals - y_vals * xdot_vals) / (r_vals ** 2)
 
 ve = Isp * g0
@@ -161,7 +166,7 @@ thrust_ang_vals[-2] = thrust_ang_2
 
 for i in range(1, num):
     if abs(thrust_vals[i - 1] * 1000) > 0:
-        dm = abs(thrust_vals[i - 1] * 1000) / (Isp * g0) * dt_val
+        dm = (abs(thrust_vals[i - 1] * 1000) / (Isp * g0)) * dt_val
         m_vals[i] = m_vals[i - 1] - dm
     else:
         m_vals[i] = m_vals[i - 1]
@@ -273,6 +278,12 @@ plt.plot(thrust_ang_vals)
 file_path = os.path.join(folder_path, "thrust_ang.png")
 plt.savefig(file_path)
 
+plt.figure()
+plt.title('mass')
+plt.plot(m_vals)
+file_path = os.path.join(folder_path, "mass.png")
+plt.savefig(file_path)
+
 
 # ----------------------------- SIMULATION -----------------------------
 
@@ -345,8 +356,6 @@ dtheta_0.set_as_constraint(equals=angular_vel_i, scaler=scale_factor(angular_vel
 # final conditions
 m_f = m[-1]
 m_f.set_as_constraint(lower=0.01, upper=0.1, scaler=1E2)
-# Ftheta_f = F_theta[-1]
-# Ftheta_f.set_as_constraint(equals=0, scaler=F_scale)
 
 r_f = r[-1]
 r_f.set_as_constraint(equals=R_f, scaler=scale_factor(R_f))
@@ -369,7 +378,7 @@ m_res = csdl.Variable(value=np.zeros((num - 1)))
 for i in csdl.frange(num - 1):
     m_total = m[i] + m_empty
 
-    Fr = thrust[i] * csdl.sin(thrust_ang[i])
+    Fr = -thrust[i] * csdl.sin(thrust_ang[i])
     Ftheta = thrust[i] * csdl.cos(thrust_ang[i])
 
     ## acceleration (radial direction)
@@ -402,18 +411,15 @@ theta_res.set_as_constraint(equals=0, scaler=1)
 dtheta_res.set_as_constraint(equals=0, scaler=1)
 m_res.set_as_constraint(equals=0, scaler=1E3)
 
-# angular momentum constraint
-# dh_dt_f = 2*r[-1]*dr[-1]*dtheta[-1] + r[-1]**2*ddr[-1]  #(for stable orbit angular momentum const, dh_dt = 0)
-# dh_dt_f.set_as_constraint(equals=0, scaler=1E-3)
-
-# objective function
-# j = csdl.sum(csdl.sqrt(Fr ** 2 + Ftheta ** 2))
+# # angular momentum constraint
+dh_dt_f = 2*r[-1]*dr[-1]*dtheta[-1] + r[-1]**2*ddr[-1]  #(for stable orbit angular momentum const, dh_dt = 0)
+# dh_dt_f.set_as_constraint(equals=0, scaler=1)
 
 # takes difference between 2 adjacent values and squares
 # smoothness = 1E-5 * csdl.sum((thrust_mag)**2)
 
 # smoothness_r = (r_scale**2) * csdl.sum((r[1:] - r[:-1])**2)
-thrust_changes = csdl.sum((thrust_ang[1:] - thrust_ang[:-1]) ** 2)
+thrust_ang_changes = csdl.sum((thrust_ang[1:] - thrust_ang[:-1])**2)
 
 mass_penalty = csdl.sum(m[0] - m[-1])
 thrust_penalty = csdl.sum(thrust ** 2)
@@ -421,7 +427,7 @@ thrust_penalty = csdl.sum(thrust ** 2)
 # j = mass_penalty + 0.5 * thrust_penalty
 # j.set_as_objective(scaler=m_scale)
 
-j = mass_penalty + thrust_changes
+j = mass_penalty + 2*thrust_ang_changes + dh_dt_f
 j.set_as_objective(scaler=m_scale)
 
 sim = csdl.experimental.JaxSimulator(recorder=recorder)
@@ -441,23 +447,25 @@ print("‣ dtheta_res max:", np.max(np.abs(dtheta_res.value)))
 print("‣ m_res max:", np.max(np.abs(m_res.value)))
 
 dt = dt.value
+m = m.value
 print("dt value:", dt)
+print("fuel:", m[0])
+
 r = r.value
 theta = theta.value
 x = r * np.cos(theta)
 y = r * np.sin(theta)
+
+dr = dr.value
+dtheta = dtheta.value
+thrust = thrust.value
+thrust_ang = thrust_ang.value
 
 th = np.linspace(0, 2 * np.pi, num=num)
 orbit_0x = R_i * np.cos(th)
 orbit_0y = R_i * np.sin(th)
 orbit_fx = R_f * np.cos(th)
 orbit_fy = R_f * np.sin(th)
-
-dr = dr.value
-dtheta = dtheta.value
-m = m.value
-thrust = thrust.value
-thrust_ang = thrust_ang.value
 
 Fr = thrust * np.sin(thrust_ang)
 Ftheta = thrust * np.cos(thrust_ang)
@@ -518,6 +526,7 @@ plt.plot(thrust)
 file_path = os.path.join(folder_path, "thrust.png")
 plt.savefig(file_path)
 
+
 plt.figure()
 plt.title('thrust angle')
 plt.plot(thrust_ang)
@@ -526,12 +535,14 @@ plt.savefig(file_path)
 
 plt.figure()
 plt.title('thrust (radial)')
+plt.ylim((-max_thrust, max_thrust))
 plt.plot(Fr)
 file_path = os.path.join(folder_path, "thrust_rad.png")
 plt.savefig(file_path)
 
 plt.figure()
 plt.title('thrust (theta)')
+plt.ylim((-max_thrust, max_thrust))
 plt.plot(Ftheta)
 file_path = os.path.join(folder_path, "thrust_th.png")
 plt.savefig(file_path)

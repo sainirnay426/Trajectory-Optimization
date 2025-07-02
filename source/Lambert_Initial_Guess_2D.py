@@ -13,10 +13,10 @@ R = 6378  # earth radius (km)
 # Problem Parameters
 m_empty = 1000
 Isp = 400  # s
-a_i = 300  # initial altitude (km)
-a_f = 1100  # final altitude (km)
-theta_start = 0
-theta_end = np.pi
+a_i = 1100  # initial altitude (km)
+a_f = 300  # final altitude (km)
+theta_start = np.pi/6
+theta_end = 7*np.pi/4
 
 R_i = R + a_i
 R_f = R + a_f
@@ -24,13 +24,13 @@ R_f = R + a_f
 # ascending or descending
 ascending = R_f > R_i
 
-# Time of flight
-h_time = np.pi * np.sqrt(((R_i + R_f) / 2) ** 3 / u) #Hohmann Transfer Time
-tof = h_time * (theta_end / np.pi) #Fraction of Hohmann Transfer Time
-
 # Initial and final position vectors
 r1 = [R_i * np.cos(theta_start), R_i * np.sin(theta_start), 0]
 r2 = [R_f * np.cos(theta_end), R_f * np.sin(theta_end), 0]
+
+# Time of flight
+h_time = np.pi * np.sqrt(((R_i + R_f) / 2) ** 3 / u) #Hohmann Transfer Time
+tof = h_time * ((theta_end - theta_start) / np.pi) #Fraction of Hohmann Transfer Time
 
 # Solve Lambert problem
 lambert = pk.lambert_problem(r1, r2, tof, u)
@@ -56,8 +56,8 @@ dvf_xy = vf_vec - np.array(v2[:2])
 r_hat = np.array([np.cos(theta_end), np.sin(theta_end)])
 theta_hat = np.array([-np.sin(theta_end), np.cos(theta_end)])
 
-dv_rf = np.dot(dvf_xy, r_hat)
-dv_thetaf = np.dot(dvf_xy, theta_hat)
+dv_rf = round(np.dot(dvf_xy, r_hat), 5)
+dv_thetaf = round(np.dot(dvf_xy, theta_hat), 5)
 dvf_p = [dv_rf, dv_thetaf]
 
 dv_1 = np.linalg.norm(dv0_p)
@@ -102,8 +102,11 @@ xdot_vals, ydot_vals = np.array(vxyz_vals[:, 0]), np.array(vxyz_vals[:, 1])
 
 r_vals = np.sqrt(x_vals ** 2 + y_vals ** 2)
 theta_vals = np.arctan2(y_vals, x_vals) % (2 * np.pi)
-dr_vals = (x_vals * xdot_vals + y_vals * ydot_vals) / r_vals
+dr_vals = ((x_vals * xdot_vals + y_vals * ydot_vals) / r_vals) * 1000
 dtheta_vals = (x_vals * ydot_vals - y_vals * xdot_vals) / (r_vals ** 2)
+
+print("r_vals:", r_vals.dtype, r_vals.shape)
+print("theta_vals:", theta_vals.dtype, theta_vals.shape)
 
 ve = Isp * g0
 m_burn_2 = m_empty * np.exp(np.abs(dv_2) * 1000 / ve)
@@ -135,14 +138,14 @@ thrust_vals = np.zeros(num)
 thrust_vals[1] = thrust_1
 thrust_vals[-2] = thrust_2
 
-thrust_ang_values = np.zeros(num)
+thrust_ang_vals = np.zeros(num)
 
 thrust_ang_1 = round(-np.arctan2(dv_r0, dv_theta0), 5)
 thrust_ang_2 = round(-np.arctan2(dv_rf, dv_thetaf), 5)
 print("thrust angle 1:", thrust_ang_1*(180/np.pi))
 print("thrust angle 2:", thrust_ang_2*(180/np.pi))
-thrust_ang_values[1] = thrust_ang_1
-thrust_ang_values[-2] = thrust_ang_2
+thrust_ang_vals[1] = thrust_ang_1
+thrust_ang_vals[-2] = thrust_ang_2
 
 for i in range(1, num):
     if abs(thrust_vals[i - 1] * 1000) > 0:
@@ -193,6 +196,9 @@ files = os.listdir(folder_path)
 for file in files:
     file_path = os.path.join(folder_path, file)
     os.remove(file_path)
+
+np.savez("lambert_initial_guess_debug.npz", r=r_vals, theta=theta_vals, dr=dr_vals, dtheta=dtheta_vals, thrust=thrust_vals, thrust_ang=thrust_ang_vals, m=m_vals)
+
 
 # Trajectory
 plt.figure()
@@ -255,7 +261,7 @@ plt.savefig(file_path)
 
 plt.figure()
 plt.title('thrust_ang')
-plt.plot(thrust_ang_values)
+plt.plot(thrust_ang_vals)
 file_path = os.path.join(folder_path, "thrust_ang.png")
 plt.savefig(file_path)
 
